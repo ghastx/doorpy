@@ -1,0 +1,23 @@
+```yaml
+# config/config.yaml
+# PIN GPIO per citofono e serratura
+ring_pin: 18             # Input da citofono
+unlock_pin: 23           # Output per serratura
+# Telephony/VoIP
+sip:
+  username: "doorpy"
+  password: "your_password"
+  domain: "sip.example.com"
+  proxy: "sip:proxy.example.com"
+  extension: "1001"      # Interno da chiamare
+dtmf:
+  unlock_code: "9"      # Tasto che apre porta
+# Audio device indices (ALSA): (capture_device, playback_device)
+# Se omesso o null, verrà effettuata rilevazione automatica del primo dispositivo disponibile
+audio_device_index: null
+# Web interface
+general:
+  web_port: 5000
+# Web interface
+general:
+  web_port: 5000

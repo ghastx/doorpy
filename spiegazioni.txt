@@ -1,0 +1,168 @@
+├── __init__.py          # Package initializer
+├── display.py           # Core display logic (DoorBellDisplay)
+├── controller.py        # GPIO e logica di sblocco porta
+├── telephony.py         # Gestione SIP/VoIP e chiamate
+├── webapp.py            # API Flask per comandi manuali
+├── config.py            # Caricamento configurazione (YAML)
+└── utils.py             # Utility condivise
+
+config/
+└── config.yaml          # Impostazioni (GPIO, SIP, DTMF, Audio)
+
+pyproject.toml           # Metadati e dipendenze
+
+systemd/
+└── doorpy.service       # Unit systemd per auto-start (contenuto sotto)
+
+```python
+# doorpy/__init__.py
+"""
+DoorPy package initializer
+"""
+__version__ = "0.1.1"
+# doorpy/display.py
+import logging
+from dot3k.lcd import LCD
+
+class DoorBellDisplay:
+    def __init__(self, config):
+        self.lcd = LCD()
+        self.config = config
+        logging.basicConfig(level=logging.INFO)
+
+    def show_message(self, message: str):
+        logging.info(f"Displaying message: {message}")
+        self.lcd.clear()
+        # Split message if longer than display width
+        self.lcd.write(message)
+
+    def clear(self):
+        logging.info("Clearing display")
+        self.lcd.clear()
+# doorpy/utils.py
+import logging
+
+# Utilità condivise
+
+def setup_logging(level=logging.INFO):
+    """
+    Configura il logging di base per l'applicazione.
+    """
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+# Aggiungi altre funzioni utili, ad esempio parsing, validazioni, ecc.
+
+Ho aggiunto i file mancanti:
+
+    doorpy/__init__.py con la versione del pacchetto
+
+    doorpy/display.py contenente la classe DoorBellDisplay
+
+    doorpy/utils.py con una funzione di setup del logging e spazio per ulteriori utilità
+
+Fammi sapere se vuoi integrare altre funzioni in utils.py o modificare il contenuto di display.py!
+Hai detto:
+spiegami in maniera sempice la logica del programma e i passaggi del suo funzionamento (files e relative funzioni attivate)
+ChatGPT ha detto:
+
+Il flusso di DoorPy è abbastanza lineare: a grandi linee carichi la configurazione, inizializzi l’hardware e la parte VoIP in background, poi rimani in ascolto (sia sul GPIO che sulle chiamate SIP) mentre il display e l’API web reagiscono agli eventi. Ecco passo-passo, file per file:
+
+    config.py
+
+        Funzione: load_config()
+
+        Cosa fa: apre config/config.yaml, lo legge e restituisce un dizionario Python con PIN GPIO, credenziali SIP, DTMF, indici audio e porta web.
+
+    utils.py
+
+        Funzione: setup_logging(level)
+
+        Cosa fa: configura il formato e il livello dei messaggi di log per tutto il programma (es. data/ora, livello, nome del logger).
+
+    controller.py
+
+        Funzione: setup_gpio(cfg)
+
+            Imposta i pin ring_pin (input) e unlock_pin (output) secondo la configurazione, e ritorna i due numeri di GPIO.
+
+        Funzione: unlock(door_pin)
+
+            Alimenta il pin di sblocco per un secondo (con time.sleep), poi lo disattiva: è il “via” fisico alla serratura elettrica.
+
+    display.py
+
+        Classe: DoorBellDisplay
+
+            __init__: inizializza il display LCD (tramite dot3k.lcd.LCD) e il logging.
+
+            show_message(msg): svuota il display e scrive il testo passato (ad esempio “Chiamata”).
+
+            clear(): pulisce il display.
+
+    telephony.py
+
+        Classe: Telephony
+
+            __init__: crea l’istanza pj.Lib(), legge le impostazioni SIP e audio dal config e salva le callback (on_ring, on_dtmf).
+
+            start() (in un thread separato):
+
+                Inizializza PJSIP (lib.init(), create_transport()).
+
+                Se audio_device_index è null fa auto-detect del primo dispositivo ALSA disponibile (sennò usa gli indici forniti).
+
+                Avvia la libreria (lib.start()) e registra l’account SIP.
+
+                Se qualcosa va storto (assenza di schede audio o errore PJSIP), logga e propaga l’eccezione.
+
+            on_incoming_call(call): viene invocato automaticamente da PJSIP all’arrivo di una chiamata dal citofono analogico: risponde con 200 OK e chiama la callback on_ring().
+
+            call_extension(): effettua la chiamata verso l’interno SIP configurato (ad es. “1001”).
+
+        Classe: CallCallback
+
+            on_dtmf_digit(digits): intercetta i toni DTMF dalla chiamata in corso; se corrispondono al codice di sblocco (unlock_code), esegue la callback on_unlock().
+
+    webapp.py
+
+        Funzione: main()
+
+            Carica la configurazione (load_config()).
+
+            Chiama setup_gpio() per preparare i pin e ottiene ring_pin e unlock_pin.
+
+            Istanzia DoorBellDisplay e Telephony, passando:
+
+                on_ring: funzione che, quando arriva una chiamata, mostra “Chiamata” sul display e chiama call_extension().
+
+                on_unlock: funzione che richiama unlock(unlock_pin).
+
+            Avvia il thread di Telephony.start(), che resta in ascolto per chiamate e DTMF.
+
+            Definisce un endpoint Flask POST /unlock che permette di sbloccare la porta via HTTP (utile per test o integrazioni).
+
+            Fa girare il server web su 0.0.0.0:<web_port>.
+
+    systemd/doorpy.service
+
+        Fa sì che all’avvio di sistema Linux il tuo script venga lanciato automaticamente come servizio di sistema, resti in background e venga riavviato in caso di crash.
+
+In sintesi:
+
+    All’avvio, il main di webapp.py carica config, abilita GPIO e display, e lancia il motore VoIP in background.
+
+    Il motore VoIP (telephony.py) registra il cliente SIP e resta in ascolto:
+
+        Se un citofono “chiama” (chiamata in ingresso), on_incoming_call -> on_ring() mostra “Chiamata” e richiama l’interno SIP.
+
+        Se durante la chiamata arriva un tasto DTMF uguale a unlock_code, on_dtmf_digit -> unlock() apre la porta.
+
+    La parte web (/unlock) è solo un pulsante di emergenza per sbloccare via HTTP.
+
+    Tutti i log (“SIP registrato”, “Display…”, “Sblocco porta”, errori audio) passano attraverso il sistema di logging impostato in utils.py.
+
+Questo ti dà un quadro chiaro di come i vari pezzi collaborano: configurazione → inizializzazioni → thread VoIP → eventi hardware → comandi display/unlock → API web.
