@@ -1,0 +1,20 @@
+# pyproject.toml
+[project]
+name = "doorpy"
+version = "0.1.1"
+description = "Integrazione tra citofono e sistema VoIP via Raspberry Pi"
+authors = ["ghastx <you@example.com>"]
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+  "RPi.GPIO>=0.7.0",
+  "Flask>=2.0",
+  "requests>=2.25",
+  "PyYAML>=5.4",
+  "dot3k>=0.0.14",
+  "pjsua>=2.10.0"
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

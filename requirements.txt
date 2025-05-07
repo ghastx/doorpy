@@ -1,0 +1,7 @@
+# requirements.txt
+RPi.GPIO>=0.7.0
+Flask>=2.0
+requests>=2.25
+PyYAML>=5.4
+dot3k>=0.0.14
+pjsua>=2.10.0
