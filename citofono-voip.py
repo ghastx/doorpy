@@ -180,11 +180,7 @@ class BaresipController:
                     text = clean
                 logger.info("baresip: %s", text)
 
-                # Cerca toni DTMF ricevuti.
-                # RFC 4733 genera due eventi per tono (end=0 inizio, end=1 fine):
-                # processiamo solo una volta, ignorando le righe con "end=0"
-                if 'end=0)' in text:
-                    continue
+                # Cerca toni DTMF ricevuti
                 m = self._RE_DTMF.search(text)
                 if m and self.on_dtmf:
                     tono = m.group(1)
