@@ -15,7 +15,7 @@ StandardOutput=journal
 StandardError=journal
 
 # Limiti risorse
-MemoryLimit=128M
+MemoryMax=128M
 CPUQuota=50%
 
 [Install]
