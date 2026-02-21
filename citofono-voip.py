@@ -132,6 +132,7 @@ class BaresipController:
         self.running = False
         self._drain_thread = None
         self.on_dtmf = None  # callback(tono: str)
+        self.on_incoming_call = None  # callback(numero: str)
 
     def avvia(self):
         """Avvia il processo Baresip."""
@@ -186,6 +187,19 @@ class BaresipController:
                     tono = m.group(1)
                     logger.info("DTMF ricevuto da baresip: %s", tono)
                     self.on_dtmf(tono)
+                    
+                # Intercetta chiamate in ingresso
+                if self.on_incoming_call and re.search(r'(?:Incoming call from|call: incoming call from)[:\s]+', text, re.IGNORECASE):
+                    # Estrae il numero dal formato SIP URI
+                    m_inc = re.search(r"sip:([^@>]+)", text)
+                    numero = m_inc.group(1) if m_inc else "Sconosciuto"
+                    Thread(target=self.on_incoming_call, args=(numero,), daemon=True).start()
+                    
+                # Rilevamento fine/rifiuto chiamata per riagganciare lo stato
+                if re.search(r'call (?:closed|terminated|rejected|busy)', text, re.IGNORECASE):
+                    self.chiamata_attiva.clear()
+                    logger.info("Chiamata terminata o rifiutata (rilevato da output baresip)")
+                    
         except Exception:
             pass
 
@@ -200,6 +214,18 @@ class BaresipController:
             return True
         except Exception as e:
             logger.error("Errore chiamata: %s", e)
+            return False
+
+    def rispondi(self):
+        """Risponde alla chiamata."""
+        logger.info("Risposta chiamata")
+        try:
+            self.processo.stdin.write(b"/accept\n")
+            self.processo.stdin.flush()
+            self.chiamata_attiva.set()
+            return True
+        except Exception as e:
+            logger.error("Errore risposta: %s", e)
             return False
 
     def riaggancia(self):
@@ -226,7 +252,6 @@ class BaresipController:
                 self.processo.terminate()
         logger.info("Baresip terminato")
 
-
 class PortoneController:
     """Gestisce il relè del portone."""
 
@@ -246,7 +271,6 @@ class PortoneController:
             time.sleep(durata)
             GPIO.output(self.pin, GPIO.LOW)
             logger.info(">>> PORTONE CHIUSO <<<")
-
 
 class SuoneriaMonitor:
     """Monitora il segnale di suoneria del citofono."""
@@ -299,6 +323,22 @@ class SuoneriaMonitor:
             logger.info("!!! SUONERIA CITOFONO RILEVATA !!!")
             self.callback()
 
+class MonitorChiamate:
+    """Monitora le chiamate in ingresso e attiva il callback."""
+
+    def __init__(self, baresip, callback):
+        self.baresip = baresip
+        self.callback = callback
+        self.running = False
+
+    def avvia(self):
+        """Avvia il monitoraggio delle chiamate in ingresso."""
+        self.running = True
+        logger.info("Monitoraggio chiamate in ingresso attivo")
+
+    def ferma(self):
+        """Ferma il monitoraggio."""
+        self.running = False
 
 class DTMFHandler:
     """Gestisce la ricezione dei toni DTMF."""
@@ -416,6 +456,24 @@ class CitofonoVoIP:
         # Thread per gestire timeout
         Thread(target=self._timeout_chiamata, daemon=True).start()
 
+    def _on_chiamata_in_ingresso(self, numero):
+        """Callback quando arriva una chiamata in ingresso."""
+        logger.info("Chiamata in ingresso da %s", numero)
+
+        if self.chiamata_in_corso.is_set():
+            logger.warning("Chiamata già in corso, rifiuto")
+            self.baresip.riaggancia()
+            return
+
+        self.chiamata_in_corso.set()
+
+        # Rispondi automaticamente dopo un breve ritardo
+        time.sleep(0.5)
+        self.baresip.rispondi()
+
+        # Thread per gestire timeout
+        Thread(target=self._timeout_chiamata, daemon=True).start()
+
     def _timeout_chiamata(self):
         """Gestisce il timeout della chiamata."""
         start = time.time()
@@ -468,6 +526,9 @@ class CitofonoVoIP:
             self.dtmf_handler = DTMFHandler(self.baresip, self.portone)
             self.dtmf_handler.avvia()
             self.baresip.on_dtmf = self.dtmf_handler.processa_dtmf
+            
+            # Collega l'evento di chiamata in ingresso
+            self.baresip.on_incoming_call = self._on_chiamata_in_ingresso
 
             # Avvia monitor suoneria
             self.suoneria = SuoneriaMonitor(PIN_SUONERIA, self._on_suoneria)
