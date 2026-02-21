@@ -172,7 +172,7 @@ class BaresipController:
                 if not line:
                     break
                 text = line.decode(errors='replace').rstrip()
-                logger.debug("baresip: %s", text)
+                logger.info("baresip: %s", text)
 
                 # Cerca toni DTMF ricevuti.
                 # RFC 4733 genera due eventi per tono (end=0 inizio, end=1 fine):
