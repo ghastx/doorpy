@@ -119,11 +119,10 @@ logger = logging.getLogger(__name__)
 class BaresipController:
     """Controlla Baresip via subprocess/stdio."""
 
-    # Pattern per riconoscere DTMF nell'output di baresip:
-    #   "received DTMF: '#' (duration=100)"
-    #   "received event: '5' (end=1)"
-    #   "received in-band DTMF event: '1' (end=0)"
-    _RE_DTMF = re.compile(r"received (?:in-band )?(?:DTMF[: ]+|event: )'([0-9A-D*#])'")
+    # Pattern per riconoscere DTMF nell'output di baresip (src/call.c):
+    #   RFC 4733: "received in-band DTMF event: '5' (end=0)"
+    #   SIP INFO: "call: received SIP INFO DTMF: '*' (duration=100)"
+    _RE_DTMF = re.compile(r"received (?:in-band DTMF event|SIP INFO DTMF): '([0-9A-D*#])'")
 
     def __init__(self):
         self.processo = None
@@ -175,7 +174,11 @@ class BaresipController:
                 text = line.decode(errors='replace').rstrip()
                 logger.debug("baresip: %s", text)
 
-                # Cerca toni DTMF ricevuti
+                # Cerca toni DTMF ricevuti.
+                # RFC 4733 genera due eventi per tono (end=0 inizio, end=1 fine):
+                # processiamo solo una volta, ignorando le righe con "end=0"
+                if 'end=0)' in text:
+                    continue
                 m = self._RE_DTMF.search(text)
                 if m and self.on_dtmf:
                     tono = m.group(1)
