@@ -1,0 +1,19 @@
+# Credenziali e configurazione locale
+config.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Log
+*.log
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

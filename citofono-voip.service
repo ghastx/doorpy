@@ -1,0 +1,16 @@
+[Unit]
+Description=Citofono VoIP - Sistema citofono su SIP/Baresip
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/citofono-voip/citofono-voip.py
+WorkingDirectory=/opt/citofono-voip
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
