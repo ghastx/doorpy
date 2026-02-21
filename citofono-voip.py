@@ -76,7 +76,7 @@ SIP_PORT = _env('SIP_PORT', '5060', int)
 NUMERO_DA_CHIAMARE = _env('NUMERO_DA_CHIAMARE', '6400')
 
 # Codice DTMF per aprire il portone
-DTMF_APRI_PORTONE = _env('DTMF_APRI_PORTONE', '99')
+DTMF_APRI_PORTONE = _env('DTMF_APRI_PORTONE', '91')
 
 # Timing
 DEBOUNCE_SUONERIA_MS = _env('DEBOUNCE_SUONERIA_MS', '300', int)
