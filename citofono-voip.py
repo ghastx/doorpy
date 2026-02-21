@@ -123,6 +123,7 @@ class BaresipController:
     #   RFC 4733: "received in-band DTMF event: '5' (end=0)"
     #   SIP INFO: "call: received SIP INFO DTMF: '*' (duration=100)"
     _RE_DTMF = re.compile(r"received (?:in-band DTMF event|SIP INFO DTMF): '([0-9A-D*#])'")
+    _RE_ANSI = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
 
     def __init__(self):
         self.processo = None
@@ -171,7 +172,12 @@ class BaresipController:
                 line = self.processo.stdout.readline()
                 if not line:
                     break
+                # Decodifica e rimuovi codici ANSI che baresip può inserire
                 text = line.decode(errors='replace').rstrip()
+                clean = self._RE_ANSI.sub('', text)
+                if clean != text:
+                    logger.info("baresip (raw): %r", text)
+                    text = clean
                 logger.info("baresip: %s", text)
 
                 # Cerca toni DTMF ricevuti.
