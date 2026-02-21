@@ -1,16 +1,22 @@
 [Unit]
-Description=Citofono VoIP - Sistema citofono su SIP/Baresip
+Description=Sistema Citofono VoIP
 After=network-online.target sound.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/citofono-voip/citofono-voip.py
+User=root
 WorkingDirectory=/opt/citofono-voip
-Restart=on-failure
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/bin/python3 /opt/citofono-voip/citofono-voip.py
+Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
+
+# Limiti risorse
+MemoryLimit=128M
+CPUQuota=50%
 
 [Install]
 WantedBy=multi-user.target
