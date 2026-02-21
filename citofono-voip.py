@@ -124,6 +124,13 @@ class BaresipController:
     #   SIP INFO: "call: received SIP INFO DTMF: '*' (duration=100)"
     _RE_DTMF = re.compile(r"received (?:in-band DTMF event|SIP INFO DTMF): '([0-9A-D*#])'")
     _RE_ANSI = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+    _RE_CALL_END = re.compile(
+        r'(?:call.*(?:closed|terminated|rejected|busy)|'
+        r'BYE|'
+        r'487 Request Terminated|'
+        r'486 Busy)',
+        re.IGNORECASE
+    )
 
     def __init__(self):
         self.processo = None
@@ -196,7 +203,7 @@ class BaresipController:
                     Thread(target=self.on_incoming_call, args=(numero,), daemon=True).start()
                     
                 # Rilevamento fine/rifiuto chiamata per riagganciare lo stato
-                if re.search(r'call (?:closed|terminated|rejected|busy)', text, re.IGNORECASE):
+                if self._RE_CALL_END.search(text):
                     self.chiamata_attiva.clear()
                     logger.info("Chiamata terminata o rifiutata (rilevato da output baresip)")
                     
@@ -322,23 +329,6 @@ class SuoneriaMonitor:
             self.ultimo_trigger = now
             logger.info("!!! SUONERIA CITOFONO RILEVATA !!!")
             self.callback()
-
-class MonitorChiamate:
-    """Monitora le chiamate in ingresso e attiva il callback."""
-
-    def __init__(self, baresip, callback):
-        self.baresip = baresip
-        self.callback = callback
-        self.running = False
-
-    def avvia(self):
-        """Avvia il monitoraggio delle chiamate in ingresso."""
-        self.running = True
-        logger.info("Monitoraggio chiamate in ingresso attivo")
-
-    def ferma(self):
-        """Ferma il monitoraggio."""
-        self.running = False
 
 class DTMFHandler:
     """Gestisce la ricezione dei toni DTMF."""
@@ -466,6 +456,7 @@ class CitofonoVoIP:
             return
 
         self.chiamata_in_corso.set()
+        self.baresip.chiamata_attiva.set()   # evita race con _timeout_chiamata
 
         # Rispondi automaticamente dopo un breve ritardo
         time.sleep(0.5)
@@ -475,21 +466,13 @@ class CitofonoVoIP:
         Thread(target=self._timeout_chiamata, daemon=True).start()
 
     def _timeout_chiamata(self):
-        """Gestisce il timeout della chiamata."""
-        start = time.time()
-        while time.time() - start < TIMEOUT_CHIAMATA_SEC:
-            if not self.chiamata_in_corso.is_set():
-                return
+        """Attende la fine della chiamata o scade il timeout."""
+        deadline = time.time() + TIMEOUT_CHIAMATA_SEC
+        while time.time() < deadline:
             if not self.baresip.chiamata_attiva.is_set():
-                time.sleep(0.5)
-            else:
-                # Chiamata risposta, attendi che termini
-                while self.baresip.chiamata_attiva.is_set():
-                    time.sleep(0.5)
-                break
-
-        # Timeout o chiamata terminata
-        if self.baresip.chiamata_attiva.is_set():
+                break          # chiamata terminata normalmente
+            time.sleep(0.5)
+        else:
             logger.info("Timeout chiamata, riaggancio")
             self.baresip.riaggancia()
 
@@ -582,13 +565,19 @@ class CitofonoVoIP:
 # ENTRY POINT
 # ============================================================
 
+sistema = None
+
+
 def signal_handler(sig, frame):
     """Gestisce segnali di terminazione."""
     logger.info("Ricevuto segnale %s", sig)
-    sys.exit(0)
+    if sistema is not None:
+        sistema.running = False
 
 
 def main():
+    global sistema
+
     # Registra handler per segnali
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
