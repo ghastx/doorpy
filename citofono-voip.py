@@ -28,6 +28,7 @@ import subprocess
 import signal
 import sys
 import os
+import re
 from threading import Thread, Event, Lock
 import logging
 
@@ -118,12 +119,19 @@ logger = logging.getLogger(__name__)
 class BaresipController:
     """Controlla Baresip via subprocess/stdio."""
 
+    # Pattern per riconoscere DTMF nell'output di baresip:
+    #   "received DTMF: '#' (duration=100)"
+    #   "received event: '5' (end=1)"
+    #   "received in-band DTMF event: '1' (end=0)"
+    _RE_DTMF = re.compile(r"received (?:in-band )?(?:DTMF[: ]+|event: )'([0-9A-D*#])'")
+
     def __init__(self):
         self.processo = None
         self.lock = Lock()
         self.chiamata_attiva = Event()
         self.running = False
         self._drain_thread = None
+        self.on_dtmf = None  # callback(tono: str)
 
     def avvia(self):
         """Avvia il processo Baresip."""
@@ -158,14 +166,21 @@ class BaresipController:
             return False
 
     def _drain_stdout(self):
-        """Legge e scarta l'output di baresip per evitare blocchi sulla pipe."""
+        """Legge l'output di baresip, rileva eventi DTMF e previene blocchi sulla pipe."""
         try:
             while True:
                 line = self.processo.stdout.readline()
                 if not line:
                     break
-                # Log opzionale per debug (disabilitato per default)
-                logger.debug("baresip: %s", line.decode(errors='replace').rstrip())
+                text = line.decode(errors='replace').rstrip()
+                logger.debug("baresip: %s", text)
+
+                # Cerca toni DTMF ricevuti
+                m = self._RE_DTMF.search(text)
+                if m and self.on_dtmf:
+                    tono = m.group(1)
+                    logger.info("DTMF ricevuto da baresip: %s", tono)
+                    self.on_dtmf(tono)
         except Exception:
             pass
 
@@ -444,9 +459,10 @@ class CitofonoVoIP:
                 self.led.errore()
                 return False
 
-            # Avvia handler DTMF
+            # Avvia handler DTMF e collegalo all'output di baresip
             self.dtmf_handler = DTMFHandler(self.baresip, self.portone)
             self.dtmf_handler.avvia()
+            self.baresip.on_dtmf = self.dtmf_handler.processa_dtmf
 
             # Avvia monitor suoneria
             self.suoneria = SuoneriaMonitor(PIN_SUONERIA, self._on_suoneria)
