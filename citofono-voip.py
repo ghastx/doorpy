@@ -51,7 +51,7 @@ def _load_config():
                         continue
                     if '=' in line:
                         key, _, value = line.partition('=')
-                        os.environ.setdefault(key.strip(), value.strip())
+                        os.environ[key.strip()] = value.strip()
             break
 
 _load_config()
@@ -85,8 +85,8 @@ TIMEOUT_CHIAMATA_SEC = _env('TIMEOUT_CHIAMATA', '60', int)
 RITARDO_POST_SUONERIA_SEC = 0.5
 
 # Audio - Verifica con 'aplay -l' e 'arecord -l'
-AUDIO_PLAY_DEVICE = _env('AUDIO_PLAY_DEVICE', 'hw:1,0')
-AUDIO_REC_DEVICE = _env('AUDIO_REC_DEVICE', 'hw:1,0')
+AUDIO_PLAY_DEVICE = _env('AUDIO_PLAY_DEVICE', 'plughw:1,0')
+AUDIO_REC_DEVICE = _env('AUDIO_REC_DEVICE', 'plughw:1,0')
 
 # Logging
 LOG_FILE = _env('LOG_FILE', '/var/log/citofono-voip.log')
