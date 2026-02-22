@@ -140,6 +140,7 @@ class BaresipController:
         self._drain_thread = None
         self.on_dtmf = None  # callback(tono: str)
         self.on_incoming_call = None  # callback(numero: str)
+        self.on_call_end = None  # callback()
 
     def avvia(self):
         """Avvia il processo Baresip."""
@@ -205,6 +206,8 @@ class BaresipController:
                 # Rilevamento fine/rifiuto chiamata per riagganciare lo stato
                 if self._RE_CALL_END.search(text):
                     self.chiamata_attiva.clear()
+                    if self.on_call_end:
+                        self.on_call_end()
                     logger.info("Chiamata terminata o rifiutata (rilevato da output baresip)")
                     
         except Exception:
@@ -242,6 +245,8 @@ class BaresipController:
             self.processo.stdin.write(b"/hangup\n")
             self.processo.stdin.flush()
             self.chiamata_attiva.clear()
+            if self.on_call_end:
+                self.on_call_end()
             return True
         except Exception as e:
             logger.error("Errore hangup: %s", e)
@@ -423,6 +428,7 @@ class CitofonoVoIP:
         self.led = None
         self._call_lock = Lock()
         self._call_active = False
+        self._chiamata_terminata = Event()
 
     def _setup_gpio(self):
         """Inizializza GPIO."""
@@ -441,6 +447,7 @@ class CitofonoVoIP:
                 logger.warning("Chiamata già in corso, ignoro suoneria")
                 return
             self._call_active = True
+            self._chiamata_terminata.clear()
 
         # Piccolo ritardo per stabilizzare
         time.sleep(RITARDO_POST_SUONERIA_SEC)
@@ -461,6 +468,7 @@ class CitofonoVoIP:
                 self.baresip.riaggancia()
                 return
             self._call_active = True
+            self._chiamata_terminata.clear()
         self.baresip.chiamata_attiva.set()   # evita race con _timeout_chiamata
 
         # Rispondi automaticamente dopo un breve ritardo
@@ -472,15 +480,12 @@ class CitofonoVoIP:
 
     def _timeout_chiamata(self):
         """Attende la fine della chiamata o scade il timeout."""
-        deadline = time.time() + TIMEOUT_CHIAMATA_SEC
-        while time.time() < deadline:
-            if not self.baresip.chiamata_attiva.is_set():
-                break          # chiamata terminata normalmente
-            time.sleep(0.5)
-        else:
+        terminata = self._chiamata_terminata.wait(timeout=TIMEOUT_CHIAMATA_SEC)
+        if not terminata:
             logger.info("Timeout chiamata, riaggancio")
             self.baresip.riaggancia()
 
+        self._chiamata_terminata.clear()
         with self._call_lock:
             self._call_active = False
 
@@ -518,6 +523,7 @@ class CitofonoVoIP:
             
             # Collega l'evento di chiamata in ingresso
             self.baresip.on_incoming_call = self._on_chiamata_in_ingresso
+            self.baresip.on_call_end = self._chiamata_terminata.set
 
             # Avvia monitor suoneria
             self.suoneria = SuoneriaMonitor(PIN_SUONERIA, self._on_suoneria)
