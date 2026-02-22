@@ -167,7 +167,7 @@ class BaresipController:
         time.sleep(4)
 
         if self.processo.poll() is None:
-            logger.info("Baresip avviato e connesso")
+            logger.info("Baresip avviato e connesso (PID: %d)", self.processo.pid)
             self.running = True
             return True
         else:
@@ -211,7 +211,7 @@ class BaresipController:
                     logger.info("Chiamata terminata o rifiutata (rilevato da output baresip)")
                     
         except Exception:
-            pass
+            logger.debug("Errore drain stdout", exc_info=True)
 
     def chiama(self, numero):
         """Effettua una chiamata."""
@@ -330,6 +330,7 @@ class SuoneriaMonitor:
     def _on_trigger(self, channel):
         """Callback quando viene rilevata la suoneria."""
         now = time.time()
+        logger.debug("GPIO%d trigger: stato=%s, timestamp=%.3f", self.pin, GPIO.input(self.pin), now)
         if now - self.ultimo_trigger > (DEBOUNCE_SUONERIA_MS / 1000.0):
             self.ultimo_trigger = now
             logger.info("!!! SUONERIA CITOFONO RILEVATA !!!")
