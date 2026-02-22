@@ -431,7 +431,11 @@ class CitofonoVoIP:
         logger.info("GPIO inizializzati")
 
     def _on_suoneria(self):
-        """Callback quando suona il citofono."""
+        """Callback quando suona il citofono — dispatch su thread separato."""
+        Thread(target=self._gestisci_suoneria, daemon=True).start()
+
+    def _gestisci_suoneria(self):
+        """Gestisce la suoneria fuori dal thread di interrupt GPIO."""
         with self._call_lock:
             if self._call_active:
                 logger.warning("Chiamata già in corso, ignoro suoneria")
