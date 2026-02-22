@@ -10,6 +10,7 @@
 set -e
 
 INSTALL_DIR="/opt/citofono-voip"
+CONFIG_DIR="/etc/citofono-voip"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "============================================================"
@@ -22,83 +23,41 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Update sistema
-echo ""
-echo "[1/6] Aggiornamento sistema..."
-apt update
-apt upgrade -y
-
 # Installa dipendenze
 echo ""
-echo "[2/6] Installazione dipendenze..."
+echo "[1/5] Installazione dipendenze..."
+apt update
 apt install -y \
-    baresip \
-    baresip-core \
     python3-rpi.gpio \
-    python3-pip \
-    alsa-utils \
-    libasound2-dev
+    baresip \
+    baresip-modules \
+    alsa-utils
 
-# Configura audio
+# Crea directory e copia file .py
 echo ""
-echo "[3/6] Configurazione audio..."
-cat > /etc/asound.conf << 'EOF'
-# Configurazione ALSA per Citofono VoIP
-# Scheda USB come default
-
-pcm.!default {
-    type hw
-    card 1
-    device 0
-}
-
-ctl.!default {
-    type hw
-    card 1
-}
-
-# Dispositivo per cattura
-pcm.mic {
-    type hw
-    card 1
-    device 0
-}
-
-# Dispositivo per riproduzione
-pcm.speaker {
-    type hw
-    card 1
-    device 0
-}
-EOF
-echo "Configurazione ALSA creata."
-
-# Crea directory e copia script
-echo ""
-echo "[4/6] Installazione script..."
+echo "[2/5] Installazione script in $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
-cp "$SCRIPT_DIR/citofono-voip.py" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/test_portone.py" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/test_suoneria.py" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/test_audio.sh" "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/citofono-voip.py"
-chmod +x "$INSTALL_DIR/test_portone.py"
-chmod +x "$INSTALL_DIR/test_suoneria.py"
-chmod +x "$INSTALL_DIR/test_audio.sh"
+for f in "$SCRIPT_DIR"/*.py; do
+    [ -f "$f" ] && cp "$f" "$INSTALL_DIR/"
+done
+chmod +x "$INSTALL_DIR"/*.py
 
-# Crea config.env da esempio se non esiste già
-if [ ! -f "$INSTALL_DIR/config.env" ]; then
-    cp "$SCRIPT_DIR/config.env.example" "$INSTALL_DIR/config.env"
-    chmod 600 "$INSTALL_DIR/config.env"
-    echo "File di configurazione creato: $INSTALL_DIR/config.env"
+# Copia config.env.example in /etc/citofono-voip/config.env se non esiste
+echo ""
+echo "[3/5] Configurazione..."
+mkdir -p "$CONFIG_DIR"
+if [ ! -f "$CONFIG_DIR/config.env" ]; then
+    cp "$SCRIPT_DIR/config.env.example" "$CONFIG_DIR/config.env"
+    chmod 600 "$CONFIG_DIR/config.env"
+    echo "File di configurazione creato: $CONFIG_DIR/config.env"
     echo "  >>> ATTENZIONE: modifica la password SIP prima di avviare! <<<"
 else
-    echo "File di configurazione esistente preservato: $INSTALL_DIR/config.env"
+    echo "File di configurazione esistente preservato: $CONFIG_DIR/config.env"
 fi
 
 # Crea servizio systemd
 echo ""
-echo "[5/6] Creazione servizio systemd..."
+echo "[4/5] Creazione servizio systemd..."
 cp "$SCRIPT_DIR/citofono-voip.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable citofono-voip
@@ -110,9 +69,9 @@ chmod 644 /var/log/citofono-voip.log
 
 # Riepilogo
 echo ""
-echo "[6/6] Verifica installazione..."
+echo "[5/5] Verifica installazione..."
 echo "  Script principale: $INSTALL_DIR/citofono-voip.py"
-echo "  Configurazione:    $INSTALL_DIR/config.env"
+echo "  Configurazione:    $CONFIG_DIR/config.env"
 echo "  Servizio systemd:  /etc/systemd/system/citofono-voip.service"
 echo "  Log:               /var/log/citofono-voip.log"
 
@@ -124,7 +83,7 @@ echo ""
 echo "Prossimi passi:"
 echo ""
 echo "1. MODIFICA LA CONFIGURAZIONE:"
-echo "   sudo nano $INSTALL_DIR/config.env"
+echo "   sudo nano $CONFIG_DIR/config.env"
 echo "   Imposta almeno: SIP_PASSWORD, SIP_DOMAIN, NUMERO_DA_CHIAMARE"
 echo ""
 echo "2. CONFIGURA IL GRANDSTREAM:"

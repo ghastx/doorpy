@@ -9,8 +9,8 @@ User=root
 WorkingDirectory=/opt/citofono-voip
 ExecStartPre=/bin/sleep 10
 ExecStart=/usr/bin/python3 /opt/citofono-voip/citofono-voip.py
-Restart=always
-RestartSec=10
+Restart=on-failure
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
