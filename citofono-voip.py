@@ -421,7 +421,8 @@ class CitofonoVoIP:
         self.suoneria = None
         self.dtmf_handler = None
         self.led = None
-        self.chiamata_in_corso = Event()
+        self._call_lock = Lock()
+        self._call_active = False
 
     def _setup_gpio(self):
         """Inizializza GPIO."""
@@ -431,11 +432,11 @@ class CitofonoVoIP:
 
     def _on_suoneria(self):
         """Callback quando suona il citofono."""
-        if self.chiamata_in_corso.is_set():
-            logger.warning("Chiamata già in corso, ignoro suoneria")
-            return
-
-        self.chiamata_in_corso.set()
+        with self._call_lock:
+            if self._call_active:
+                logger.warning("Chiamata già in corso, ignoro suoneria")
+                return
+            self._call_active = True
 
         # Piccolo ritardo per stabilizzare
         time.sleep(RITARDO_POST_SUONERIA_SEC)
@@ -450,12 +451,12 @@ class CitofonoVoIP:
         """Callback quando arriva una chiamata in ingresso."""
         logger.info("Chiamata in ingresso da %s", numero)
 
-        if self.chiamata_in_corso.is_set():
-            logger.warning("Chiamata già in corso, rifiuto")
-            self.baresip.riaggancia()
-            return
-
-        self.chiamata_in_corso.set()
+        with self._call_lock:
+            if self._call_active:
+                logger.warning("Chiamata già in corso, rifiuto")
+                self.baresip.riaggancia()
+                return
+            self._call_active = True
         self.baresip.chiamata_attiva.set()   # evita race con _timeout_chiamata
 
         # Rispondi automaticamente dopo un breve ritardo
@@ -476,7 +477,8 @@ class CitofonoVoIP:
             logger.info("Timeout chiamata, riaggancio")
             self.baresip.riaggancia()
 
-        self.chiamata_in_corso.clear()
+        with self._call_lock:
+            self._call_active = False
 
     def avvia(self):
         """Avvia il sistema."""
