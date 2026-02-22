@@ -489,6 +489,54 @@ class CitofonoVoIP:
         with self._call_lock:
             self._call_active = False
 
+    def _genera_config_baresip(self):
+        """Genera i file di configurazione per Baresip."""
+        baresip_dir = '/root/.baresip'
+        accounts_path = os.path.join(baresip_dir, 'accounts')
+        config_path = os.path.join(baresip_dir, 'config')
+
+        # Crea la directory se non esiste
+        if not os.path.isdir(baresip_dir):
+            os.makedirs(baresip_dir)
+            logger.info("Creata directory %s", baresip_dir)
+
+        # Backup dei file esistenti
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        for path in (accounts_path, config_path):
+            if os.path.isfile(path):
+                backup = f"{path}.bak.{timestamp}"
+                os.rename(path, backup)
+                logger.info("Backup %s -> %s", path, backup)
+
+        # Scrivi accounts
+        accounts_line = (
+            f"<sip:{SIP_USERNAME}@{SIP_DOMAIN}>"
+            f";auth_pass={SIP_PASSWORD}"
+            f";regint=300"
+            f";answermode=manual\n"
+        )
+        with open(accounts_path, 'w') as f:
+            f.write(accounts_line)
+        logger.info("Scritto %s", accounts_path)
+
+        # Scrivi config
+        config_content = (
+            f"module_path /usr/lib/baresip/modules\n"
+            f"audio_player alsa,{AUDIO_PLAY_DEVICE}\n"
+            f"audio_source alsa,{AUDIO_REC_DEVICE}\n"
+            f"module alsa.so\n"
+            f"module account.so\n"
+            f"module menu.so\n"
+            f"module contact.so\n"
+            f"module stdio.so\n"
+            f"module g711.so\n"
+            f"module ctrl_tcp.so\n"
+            f"ctrl_tcp_listen 0.0.0.0:4444\n"
+        )
+        with open(config_path, 'w') as f:
+            f.write(config_content)
+        logger.info("Scritto %s", config_path)
+
     def avvia(self):
         """Avvia il sistema."""
         logger.info("=" * 60)
@@ -508,6 +556,9 @@ class CitofonoVoIP:
             self.portone = PortoneController(PIN_RELE_PORTONE)
             self.led = LEDStatus(PIN_LED_STATO)
             self.led.avvia()
+
+            # Genera configurazione Baresip
+            self._genera_config_baresip()
 
             # Avvia Baresip
             self.baresip = BaresipController()
