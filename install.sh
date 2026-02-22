@@ -30,7 +30,7 @@ apt update
 apt install -y \
     python3-rpi.gpio \
     baresip \
-    baresip-modules \
+    baresip-core \
     alsa-utils
 
 # Crea directory e copia file .py
