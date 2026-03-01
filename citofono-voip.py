@@ -37,22 +37,17 @@ import logging
 # ============================================================
 
 def _load_config():
-    """Carica la configurazione da config.env se presente."""
-    config_paths = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.env'),
-        '/etc/citofono-voip/config.env',
-    ]
-    for path in config_paths:
-        if os.path.isfile(path):
-            with open(path) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    if '=' in line:
-                        key, _, value = line.partition('=')
-                        os.environ[key.strip()] = value.strip()
-            break
+    """Carica la configurazione da /etc/citofono-voip/config.env se presente."""
+    path = '/etc/citofono-voip/config.env'
+    if os.path.isfile(path):
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' in line:
+                    key, _, value = line.partition('=')
+                    os.environ[key.strip()] = value.strip()
 
 _load_config()
 
@@ -369,6 +364,10 @@ class DTMFHandler:
             logger.info("Codice apertura ricevuto: %s", DTMF_APRI_PORTONE)
             self.portone.apri()
             self.buffer = ""
+            # Piccolo ritardo prima di riagganciare
+            time.sleep(2)
+            logger.info("Portone aperto, riaggancio chiamata")
+            self.baresip.riaggancia()
 
     def termina(self):
         self.running = False
