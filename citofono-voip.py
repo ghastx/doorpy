@@ -272,7 +272,10 @@ class BaresipController:
             return False
 
     def riaggancia(self):
-        """Termina la chiamata."""
+        """Termina la chiamata. Ignora se nessuna chiamata è attiva."""
+        if not self.chiamata_attiva.is_set():
+            logger.debug("Riaggancio ignorato, nessuna chiamata attiva")
+            return True
         logger.info("Termine chiamata")
         try:
             self.processo.stdin.write(b"/hangup\n")
