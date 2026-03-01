@@ -61,6 +61,22 @@ PIN_SUONERIA = _env('PIN_SUONERIA', '17', int)
 PIN_RELE_PORTONE = _env('PIN_RELE_PORTONE', '27', int)
 PIN_LED_STATO = _env('PIN_LED_STATO', '22', int)
 
+def _validate_gpio_pins():
+    """Valida i PIN GPIO configurati."""
+    pins = {
+        'PIN_SUONERIA': PIN_SUONERIA,
+        'PIN_RELE_PORTONE': PIN_RELE_PORTONE,
+        'PIN_LED_STATO': PIN_LED_STATO,
+    }
+    for name, pin in pins.items():
+        if not (2 <= pin <= 27):
+            raise ValueError(f"{name}={pin} non valido. Usa GPIO 2-27")
+    values = list(pins.values())
+    if len(values) != len(set(values)):
+        raise ValueError(f"Pin GPIO duplicati: {pins}")
+
+_validate_gpio_pins()
+
 # Configurazione SIP
 SIP_USERNAME = _env('SIP_USERNAME', '2000')
 SIP_PASSWORD = _env('SIP_PASSWORD', '')
@@ -126,6 +142,13 @@ class BaresipController:
         r'486 Busy)',
         re.IGNORECASE
     )
+    _RE_IMPORTANT = re.compile(
+        r'(?:error|warning|incoming call|outgoing|registered|DTMF|BYE|'
+        r'busy|rejected|closed|terminated|failed)',
+        re.IGNORECASE
+    )
+    _RE_REG_OK = re.compile(r'(?:registered successfully|200 OK.*register)', re.IGNORECASE)
+    _RE_REG_FAIL = re.compile(r'(?:register.*failed|register.*timeout|403|401 Unauthorized)', re.IGNORECASE)
 
     def __init__(self):
         self.processo = None
@@ -136,6 +159,7 @@ class BaresipController:
         self.on_dtmf = None  # callback(tono: str)
         self.on_incoming_call = None  # callback(numero: str)
         self.on_call_end = None  # callback()
+        self._reg_fail_count = 0
 
     def avvia(self):
         """Avvia il processo Baresip."""
@@ -180,9 +204,12 @@ class BaresipController:
                 text = line.decode(errors='replace').rstrip()
                 clean = self._RE_ANSI.sub('', text)
                 if clean != text:
-                    logger.info("baresip (raw): %r", text)
+                    logger.debug("baresip (raw): %r", text)
                     text = clean
-                logger.info("baresip: %s", text)
+                if self._RE_IMPORTANT.search(text):
+                    logger.info("baresip: %s", text)
+                else:
+                    logger.debug("baresip: %s", text)
 
                 # Cerca toni DTMF ricevuti
                 m = self._RE_DTMF.search(text)
@@ -204,7 +231,18 @@ class BaresipController:
                     if self.on_call_end:
                         self.on_call_end()
                     logger.info("Chiamata terminata o rifiutata (rilevato da output baresip)")
-                    
+
+                # Monitoraggio registrazione SIP
+                if self._RE_REG_OK.search(text):
+                    self._reg_fail_count = 0
+                    logger.info("Registrazione SIP OK")
+                elif self._RE_REG_FAIL.search(text):
+                    self._reg_fail_count += 1
+                    logger.warning("Registrazione SIP fallita (%d consecutive)", self._reg_fail_count)
+                    if self._reg_fail_count >= 3:
+                        logger.error("Registrazione SIP fallita 3 volte, riavvio baresip")
+                        Thread(target=self._restart_baresip, daemon=True).start()
+
         except Exception:
             logger.debug("Errore drain stdout", exc_info=True)
 
@@ -258,6 +296,19 @@ class BaresipController:
             if self.processo:
                 self.processo.terminate()
         logger.info("Baresip terminato")
+
+    def _restart_baresip(self):
+        """Riavvia baresip dopo fallimenti di registrazione."""
+        self._reg_fail_count = 0
+        try:
+            self.processo.stdin.write(b"/quit\n")
+            self.processo.stdin.flush()
+            self.processo.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            if self.processo:
+                self.processo.terminate()
+        time.sleep(2)
+        self.avvia()
 
 class PortoneController:
     """Gestisce il relè del portone."""
@@ -362,12 +413,15 @@ class DTMFHandler:
         # Controlla se corrisponde al codice apertura
         if self.buffer.endswith(DTMF_APRI_PORTONE):
             logger.info("Codice apertura ricevuto: %s", DTMF_APRI_PORTONE)
-            self.portone.apri()
             self.buffer = ""
-            # Piccolo ritardo prima di riagganciare
-            time.sleep(2)
-            logger.info("Portone aperto, riaggancio chiamata")
-            self.baresip.riaggancia()
+            Thread(target=self._apri_e_riaggancia, daemon=True).start()
+
+    def _apri_e_riaggancia(self):
+        """Apre il portone e riaggancia la chiamata (eseguito in thread separato)."""
+        self.portone.apri()
+        time.sleep(2)
+        logger.info("Portone aperto, riaggancio chiamata")
+        self.baresip.riaggancia()
 
     def termina(self):
         self.running = False
@@ -430,6 +484,12 @@ class CitofonoVoIP:
         self._call_active = False
         self._chiamata_terminata = Event()
 
+    def _on_call_end(self):
+        """Callback thread-safe per fine chiamata."""
+        with self._call_lock:
+            self._call_active = False
+        self._chiamata_terminata.set()
+
     def _setup_gpio(self):
         """Inizializza GPIO."""
         GPIO.setmode(GPIO.BCM)
@@ -484,10 +544,7 @@ class CitofonoVoIP:
         if not terminata:
             logger.info("Timeout chiamata, riaggancio")
             self.baresip.riaggancia()
-
         self._chiamata_terminata.clear()
-        with self._call_lock:
-            self._call_active = False
 
     def _genera_config_baresip(self):
         """Genera i file di configurazione per Baresip."""
@@ -574,13 +631,14 @@ class CitofonoVoIP:
             
             # Collega l'evento di chiamata in ingresso
             self.baresip.on_incoming_call = self._on_chiamata_in_ingresso
-            self.baresip.on_call_end = self._chiamata_terminata.set
+            self.baresip.on_call_end = self._on_call_end
 
             # Avvia monitor suoneria
             self.suoneria = SuoneriaMonitor(PIN_SUONERIA, self._on_suoneria)
             self.suoneria.avvia()
 
             self.running = True
+            self._start_time = time.time()
 
             logger.info("-" * 60)
             logger.info("SISTEMA PRONTO")
@@ -623,35 +681,35 @@ class CitofonoVoIP:
         GPIO.cleanup()
         logger.info("Sistema terminato")
 
+    def get_status(self):
+        """Ritorna lo stato del sistema per debugging."""
+        return {
+            'running': self.running,
+            'uptime_sec': int(time.time() - self._start_time) if hasattr(self, '_start_time') else 0,
+            'call_active': self._call_active,
+            'baresip_running': self.baresip.running if self.baresip else False,
+            'baresip_pid': self.baresip.processo.pid if self.baresip and self.baresip.processo else None,
+        }
+
 
 # ============================================================
 # ENTRY POINT
 # ============================================================
 
-sistema = None
-
-
-def signal_handler(sig, frame):
-    """Gestisce segnali di terminazione."""
-    logger.info("Ricevuto segnale %s", sig)
-    if sistema is not None:
-        sistema.running = False
-
-
 def main():
-    global sistema
-
-    # Registra handler per segnali
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
     # Verifica permessi root (necessari per GPIO)
     if os.geteuid() != 0:
         print("ERRORE: Eseguire come root (sudo)")
         sys.exit(1)
 
-    # Avvia sistema
     sistema = CitofonoVoIP()
+
+    def signal_handler(sig, frame):
+        logger.info("Ricevuto segnale %s", sig)
+        sistema.running = False
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     if sistema.avvia():
         sistema.loop()
